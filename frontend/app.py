@@ -219,6 +219,26 @@ pct_saved = baseline_comp["percentage_improvement"]
 man_down = baseline_comp["manual_down_time_minutes"]
 cp_down = baseline_comp["cpsat_down_time_minutes"]
 
+# Live evaluation of punctuality impact from database state
+live_sim = simulate_segment_traffic_impact(segment_id="SEG_035")
+pri_delay = live_sim["total_primary_delay_minutes"]
+cas_delay = live_sim["total_cascade_delay_minutes"]
+tot_delay = pri_delay + cas_delay
+
+if tot_delay == 0:
+    punc_color = "#10b981"
+    punc_val = f"{pri_delay}m Primary | {cas_delay}m Cascade"
+    punc_sub = "100% On-Time (10-Min Safety Headway Preserved)"
+else:
+    punc_color = "#ef4444"
+    punc_val = f"{pri_delay}m Primary | {cas_delay}m Cascade"
+    punc_sub = f"⚠️ Delays Detected ({tot_delay}m Total Impact)"
+
+# Live distributed decomposition benchmark
+bm = benchmark_centralized_vs_decomposed()
+decomp_ms = bm["decomposed_time_ms"]
+sub_areas_count = bm["sub_areas_count"]
+
 with col1:
     st.markdown(f"""
     <div class="kpi-card">
@@ -229,11 +249,11 @@ with col1:
     """, unsafe_allow_html=True)
 
 with col2:
-    st.markdown("""
+    st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">Operational Punctuality</div>
-        <div class="kpi-value" style="color: #10b981;">0m Primary | 0m Cascade</div>
-        <div class="kpi-sub">100% On-Time (10-Min Safety Headway Preserved)</div>
+        <div class="kpi-value" style="color: {punc_color};">{punc_val}</div>
+        <div class="kpi-sub">{punc_sub}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -247,11 +267,11 @@ with col3:
     """, unsafe_allow_html=True)
 
 with col4:
-    st.markdown("""
+    st.markdown(f"""
     <div class="kpi-card">
         <div class="kpi-title">Decomposed Distributed Solve</div>
-        <div class="kpi-value" style="color: #a855f7;">31.5 ms</div>
-        <div class="kpi-sub">Zone-Scale Parallel CP-SAT Workers (Lippes 2020)</div>
+        <div class="kpi-value" style="color: #a855f7;">{decomp_ms} ms</div>
+        <div class="kpi-sub">Zone-Scale Parallel CP-SAT ({sub_areas_count} Sub-Areas)</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -402,6 +422,9 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 with tab1:
     st.write("### Active Maintenance Demands Across Corridor")
+    deferred_blocks = blocks_df[blocks_df["status"] == "Deferred"]
+    if len(deferred_blocks) > 0:
+        st.warning(f"⚠️ **Notice**: {len(deferred_blocks)} maintenance demand(s) currently **Deferred** due to heavy traffic saturation. Review below.")
     st.dataframe(
         blocks_df[[
             "block_id", "department", "block_type", "status", "segment_id",
@@ -600,7 +623,7 @@ with tab4:
 
 with tab5:
     st.write("### ⚡ Geographical Distributed Decomposition (Lippes' TU Delft Thesis 2020)")
-    bm = benchmark_centralized_vs_decomposed()
+    # Re-use precomputed bm to guarantee 100% telemetry consistency with top KPI banner
     
     col_d1, col_d2, col_d3 = st.columns(3)
     with col_d1:

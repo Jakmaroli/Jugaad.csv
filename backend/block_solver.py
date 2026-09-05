@@ -24,7 +24,7 @@ from ortools.sat.python import cp_model
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database_schema import get_db_path
-from backend.config import TARGET_DATE_STR
+from backend.config import TARGET_DATE_STR, MAX_SHIFT_MINUTES, DEFAULT_HEADWAY_BUFFER_MINUTES
 
 
 def time_to_minutes(dt_str: str) -> int:
@@ -118,22 +118,31 @@ def load_solver_inputs(db_path: Optional[str] = None) -> Tuple[List[Dict[str, An
 # -----------------------------------------------------------------------------
 # CP-SAT Solver Formulation
 # -----------------------------------------------------------------------------
+# CP-SAT Constraint Programming Solver Engine
+# -----------------------------------------------------------------------------
 def build_and_solve_block_schedule(
     block_requests: List[Dict[str, Any]],
     train_passages: List[Dict[str, Any]],
-    max_shift_minutes: int = 140,
-    headway_buffer_minutes: int = 10,
+    max_shift_minutes: int = MAX_SHIFT_MINUTES,
+    headway_buffer_minutes: int = DEFAULT_HEADWAY_BUFFER_MINUTES,
     time_limit_seconds: int = 10,
 ) -> Dict[str, Any]:
     """
     Formulate and solve CP-SAT model for railway maintenance scheduling.
+    
+    Robustness Architecture:
+    - Emergency blocks are strictly mandatory (model.Add(sched == 1)).
+    - Non-emergency blocks (Routine, Integrated, Shadow) are schedulable (sched is free boolean).
+    - If a non-emergency block has no legal gap in dense train traffic, it is gracefully deferred
+      without making the entire corridor schedule INFEASIBLE.
+    - Schedulable blocks carry a high objective bonus (10,000 pts) so CP-SAT will ALWAYS schedule
+      every block that can be legally placed without train conflicts.
     """
     model = cp_model.CpModel()
 
     start_vars = {}
     end_vars = {}
     duration_vars = {}
-    interval_vars = {}
     is_scheduled_vars = {}
     shift_vars = {}
 
@@ -151,17 +160,16 @@ def build_and_solve_block_schedule(
         et = model.NewIntVar(lb + dur, ub + dur, f"end_{b_id}")
         model.Add(et == st + dur)
 
-        # Emergency blocks are mandatory; others are schedulable
+        # Emergency blocks are mandatory; routine/integrated are free decision booleans
         sched = model.NewBoolVar(f"sched_{b_id}")
-        if b["block_type"] == "Emergency":
+        if b.get("block_type") == "Emergency":
             model.Add(sched == 1)
-        else:
-            model.Add(sched == 1)  # All 7 blocks in our benchmark can be scheduled
 
-        # Absolute shift from requested time: |st - req_s|
+        # Shift tracking: only penalize shift if block is actually scheduled
         sh = model.NewIntVar(0, max_shift_minutes, f"shift_{b_id}")
-        model.Add(sh >= st - req_s)
-        model.Add(sh >= req_s - st)
+        model.Add(sh >= st - req_s).OnlyEnforceIf(sched)
+        model.Add(sh >= req_s - st).OnlyEnforceIf(sched)
+        model.Add(sh == 0).OnlyEnforceIf(sched.Not())
 
         start_vars[b_id] = st
         end_vars[b_id] = et
@@ -174,6 +182,7 @@ def build_and_solve_block_schedule(
         b_id = b["block_id"]
         b_km_s = b["km_start"]
         b_km_e = b["km_end"]
+        sched = is_scheduled_vars[b_id]
 
         # Find all trains that occupy the block's track segment
         overlapping_trains = []
@@ -184,18 +193,15 @@ def build_and_solve_block_schedule(
 
         for t in overlapping_trains:
             t_id = t["entry_id"]
-            # Strict 10-minute safety buffer
-            # Block must finish <= train_arrival - buffer OR start >= train_departure + buffer
             t_start_buffered = max(0, t["arrival_min"] - headway_buffer_minutes)
             t_end_buffered = min(1440, t["departure_min"] + headway_buffer_minutes)
 
-            # Boolean: True if block finishes before train arrives
+            # If scheduled, block must finish before train arrival OR start after departure
             before_train = model.NewBoolVar(f"{b_id}_before_{t_id}")
-            model.Add(end_vars[b_id] <= t_start_buffered).OnlyEnforceIf(before_train)
-            model.Add(start_vars[b_id] >= t_end_buffered).OnlyEnforceIf(before_train.Not())
+            model.Add(end_vars[b_id] <= t_start_buffered).OnlyEnforceIf([before_train, sched])
+            model.Add(start_vars[b_id] >= t_end_buffered).OnlyEnforceIf([before_train.Not(), sched])
 
     # 3. Multi-Department Coordinated Bundling (Integrated & Shadow Blocks)
-    # Detect segments with multiple block requests
     segment_groups: Dict[str, List[str]] = {}
     for b in block_requests:
         seg = b["segment_id"]
@@ -209,34 +215,44 @@ def build_and_solve_block_schedule(
         span_max = model.NewIntVar(0, 1440, f"span_max_{seg}")
         span_dur = model.NewIntVar(0, 1440, f"span_dur_{seg}")
 
-        model.AddMinEquality(span_min, [start_vars[bid] for bid in b_ids])
-        model.AddMaxEquality(span_max, [end_vars[bid] for bid in b_ids])
-        model.Add(span_dur == span_max - span_min)
+        # Link span bounds to scheduled blocks on this segment
+        for bid in b_ids:
+            model.Add(span_min <= start_vars[bid]).OnlyEnforceIf(is_scheduled_vars[bid])
+            model.Add(span_max >= end_vars[bid]).OnlyEnforceIf(is_scheduled_vars[bid])
+
+        any_sched = model.NewBoolVar(f"any_sched_{seg}")
+        model.AddMaxEquality(any_sched, [is_scheduled_vars[bid] for bid in b_ids])
+
+        model.Add(span_max >= span_min).OnlyEnforceIf(any_sched)
+        model.Add(span_dur >= span_max - span_min).OnlyEnforceIf(any_sched)
+        model.Add(span_dur == 0).OnlyEnforceIf(any_sched.Not())
+        model.Add(span_min == 0).OnlyEnforceIf(any_sched.Not())
+        model.Add(span_max == 0).OnlyEnforceIf(any_sched.Not())
 
         span_vars[seg] = {
             "min": span_min,
             "max": span_max,
             "dur": span_dur,
             "block_ids": b_ids,
+            "any_sched": any_sched,
         }
 
     # 4. Multi-Objective Function
-    # Maximize: Sum(10 * priority * sched) - (20 * Joint Possession Span) - (5 * Shift Minutes)
-    # Scaled by 10 to maintain integer arithmetic precision
+    # Maximize: Sum((10,000 + 100*priority) * sched) - (20 * Joint Possession Span) - (5 * Shift Minutes)
     priority_terms = []
     for b in block_requests:
         b_id = b["block_id"]
-        wt = int(b["priority_weight"] * 10)
+        wt = 10000 + int(b.get("priority_weight", 5.0) * 100)
         priority_terms.append(wt * is_scheduled_vars[b_id])
 
     span_penalty_terms = []
     for seg, s_info in span_vars.items():
-        span_penalty_terms.append(20 * s_info["dur"])  # 2 * 10 = 20
+        span_penalty_terms.append(20 * s_info["dur"])
 
     shift_penalty_terms = []
     for b in block_requests:
         b_id = b["block_id"]
-        shift_penalty_terms.append(5 * shift_vars[b_id])  # 0.5 * 10 = 5
+        shift_penalty_terms.append(5 * shift_vars[b_id])
 
     total_objective = (
         sum(priority_terms)
@@ -258,41 +274,57 @@ def build_and_solve_block_schedule(
         "status": status_name,
         "success": success,
         "scheduled_blocks": {},
+        "unscheduled_blocks": {},
         "segment_possession_spans": {},
     }
 
     if success:
         for b in block_requests:
             b_id = b["block_id"]
+            sc_val = (solver.Value(is_scheduled_vars[b_id]) == 1)
             st_val = solver.Value(start_vars[b_id])
             et_val = solver.Value(end_vars[b_id])
             sh_val = solver.Value(shift_vars[b_id])
-            sc_val = solver.Value(is_scheduled_vars[b_id]) == 1
 
-            results["scheduled_blocks"][b_id] = {
+            block_entry = {
                 "block_id": b_id,
                 "department": b["department"],
                 "block_type": b["block_type"],
                 "segment_id": b["segment_id"],
-                "scheduled_start_min": st_val,
-                "scheduled_end_min": et_val,
-                "scheduled_start_iso": minutes_to_iso(st_val),
-                "scheduled_end_iso": minutes_to_iso(et_val),
+                "scheduled_start_min": st_val if sc_val else None,
+                "scheduled_end_min": et_val if sc_val else None,
+                "scheduled_start_iso": minutes_to_iso(st_val) if sc_val else None,
+                "scheduled_end_iso": minutes_to_iso(et_val) if sc_val else None,
                 "duration_min": b["duration_min"],
-                "shift_minutes": sh_val,
+                "shift_minutes": sh_val if sc_val else None,
                 "is_scheduled": sc_val,
-                "priority_weight": b["priority_weight"],
-                "work_description": b["work_description"],
+                "priority_weight": b.get("priority_weight", 5.0),
+                "work_description": b.get("work_description", ""),
             }
+
+            if sc_val:
+                results["scheduled_blocks"][b_id] = block_entry
+            else:
+                block_entry["reason"] = (
+                    f"No conflict-free train window available within operational shift window (±{max_shift_minutes}m) "
+                    f"respecting {headway_buffer_minutes}-min safety headways."
+                )
+                results["unscheduled_blocks"][b_id] = block_entry
 
         for seg, s_info in span_vars.items():
             s_min_val = solver.Value(s_info["min"])
             s_max_val = solver.Value(s_info["max"])
             s_dur_val = solver.Value(s_info["dur"])
+            sched_bids = [bid for bid in s_info["block_ids"] if bid in results["scheduled_blocks"]]
             sum_individual_durations = sum(
-                results["scheduled_blocks"][bid]["duration_min"] for bid in s_info["block_ids"]
+                results["scheduled_blocks"][bid]["duration_min"] for bid in sched_bids
             )
-            overlap_savings = sum_individual_durations - s_dur_val
+            overlap_savings = max(0, sum_individual_durations - s_dur_val)
+            savings_pct = (
+                round((overlap_savings / sum_individual_durations) * 100, 1)
+                if sum_individual_durations > 0
+                else 0.0
+            )
 
             results["segment_possession_spans"][seg] = {
                 "segment_id": seg,
@@ -303,8 +335,8 @@ def build_and_solve_block_schedule(
                 "possession_duration_min": s_dur_val,
                 "sum_individual_durations_min": sum_individual_durations,
                 "overlap_savings_min": overlap_savings,
-                "savings_pct": round((overlap_savings / sum_individual_durations) * 100, 1),
-                "bundled_block_ids": s_info["block_ids"],
+                "savings_pct": savings_pct,
+                "bundled_block_ids": sched_bids,
             }
 
     return results
@@ -319,28 +351,36 @@ def persist_solver_results_to_database(
 ) -> int:
     """
     Write scheduled start/end timestamps back to bdms_blocks, update status to
-    'Sanctioning', and log the optimization run to decision_audit.
+    'Sanctioning', defer unscheduled requests, and log the optimization run to decision_audit.
     """
-    if not solver_results.get("success"):
-        return 0
-
     resolved_path = get_db_path(db_path)
     conn = sqlite3.connect(resolved_path)
     cursor = conn.cursor()
-
-    scheduled_blocks = solver_results["scheduled_blocks"]
     audit_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-    updated_count = 0
-    for b_id, b_data in scheduled_blocks.items():
-        if not b_data["is_scheduled"]:
-            continue
+    if not solver_results.get("success"):
+        # Log critical safety alert to decision_audit
+        cursor.execute("""
+            INSERT INTO decision_audit
+            (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
+            VALUES (?, 'SYSTEM', 'Infeasible', 'System CTPC Solver', ?, 
+                    'CRITICAL SAFETY CONFLICT: Mandatory Emergency block could not be scheduled without train collision. Section Controller manual intervention required.', 
+                    'Submission', 'Flagged')
+        """, (f"AUDIT_FAIL_{int(datetime.now().timestamp())}", audit_timestamp))
+        conn.commit()
+        conn.close()
+        return 0
 
+    scheduled_blocks = solver_results.get("scheduled_blocks", {})
+    unscheduled_blocks = solver_results.get("unscheduled_blocks", {})
+    updated_count = 0
+
+    # 1. Update Scheduled Blocks
+    for b_id, b_data in scheduled_blocks.items():
         st_iso = b_data["scheduled_start_iso"]
         et_iso = b_data["scheduled_end_iso"]
         shift_m = b_data["shift_minutes"]
 
-        # 1. Update bdms_blocks: approved_start, approved_end, status = 'Sanctioning'
         cursor.execute("""
             UPDATE bdms_blocks
             SET approved_start = ?,
@@ -349,7 +389,6 @@ def persist_solver_results_to_database(
             WHERE block_id = ?
         """, (st_iso, et_iso, b_id))
 
-        # 2. Log to decision_audit
         audit_id = f"AUDIT_SOLVER_{b_id}"
         reason = (
             f"CP-SAT Solver optimal schedule. Shifted by {shift_m}m. "
@@ -360,7 +399,25 @@ def persist_solver_results_to_database(
             (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
             VALUES (?, ?, 'Sanctioning', 'System CTPC Solver', ?, ?, 'Submission', 'Sanctioning')
         """, (audit_id, b_id, audit_timestamp, reason))
+        updated_count += 1
 
+    # 2. Update Unscheduled / Deferred Blocks
+    for b_id, b_data in unscheduled_blocks.items():
+        cursor.execute("""
+            UPDATE bdms_blocks
+            SET approved_start = NULL,
+                approved_end = NULL,
+                status = 'Deferred'
+            WHERE block_id = ?
+        """, (b_id,))
+
+        audit_id = f"AUDIT_DEFER_{b_id}"
+        reason = b_data.get("reason", "Automated scheduling deferred: No conflict-free train window available.")
+        cursor.execute("""
+            INSERT OR REPLACE INTO decision_audit
+            (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
+            VALUES (?, ?, 'Defer', 'System CTPC Solver', ?, ?, 'Submission', 'Deferred')
+        """, (audit_id, b_id, audit_timestamp, reason))
         updated_count += 1
 
     conn.commit()
@@ -418,6 +475,15 @@ def print_solver_report(solver_results: Dict[str, Any]):
         e_hhmm = minutes_to_hhmm(b["scheduled_end_min"])
         win = f"{s_hhmm} - {e_hhmm}"
         print(f"{b['block_id']:15} {b['department']:12} {b['block_type']:11} {b['segment_id']:8} {win:18} {b['duration_min']:3d}m   {b['shift_minutes']:3d}m    {b['priority_weight']:5.1f}")
+    
+    # 3. Deferred / Unscheduled Blocks (if any)
+    unsched = solver_results.get("unscheduled_blocks", {})
+    if unsched:
+        print("\n" + "-" * 80)
+        print(">>> DEFERRED / UNSCHEDULED MAINTENANCE DEMANDS:")
+        for bid, b in sorted(unsched.items()):
+            print(f" * [{b['block_id']:14}] {b['department']:11} | {b['block_type']:10} | {b['segment_id']:8} | Reason: {b.get('reason')}")
+
     print("=" * 80 + "\n")
 
 

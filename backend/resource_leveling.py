@@ -32,6 +32,7 @@ from backend.block_solver import (
     minutes_to_iso,
     minutes_to_hhmm,
 )
+from backend.config import MAX_SHIFT_MINUTES, DEFAULT_HEADWAY_BUFFER_MINUTES
 
 # Standard machine resource catalog for the division
 DIVISION_RESOURCES = {
@@ -87,8 +88,8 @@ def parse_resource_type(resource_str: Optional[str], dept: str) -> Optional[str]
 
 def solve_with_resource_leveling(
     db_path: Optional[str] = None,
-    max_shift_minutes: int = 140,
-    headway_buffer_minutes: int = 10,
+    max_shift_minutes: int = MAX_SHIFT_MINUTES,
+    headway_buffer_minutes: int = DEFAULT_HEADWAY_BUFFER_MINUTES,
     time_limit_seconds: int = 5,
 ) -> Dict[str, Any]:
     """

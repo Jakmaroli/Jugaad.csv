@@ -30,16 +30,16 @@ from backend.block_solver import (
     time_to_minutes,
     minutes_to_iso,
     minutes_to_hhmm,
-    TARGET_DATE_STR,
 )
+from backend.config import TARGET_DATE_STR, MAX_SHIFT_MINUTES, DEFAULT_HEADWAY_BUFFER_MINUTES
 
 
 def solve_pareto_point(
     block_requests: List[Dict[str, Any]],
     train_passages: List[Dict[str, Any]],
     lambda_punctuality: float,
-    max_shift_minutes: int = 140,
-    headway_buffer_minutes: int = 10,
+    max_shift_minutes: int = MAX_SHIFT_MINUTES,
+    headway_buffer_minutes: int = DEFAULT_HEADWAY_BUFFER_MINUTES,
     time_limit_seconds: int = 5,
 ) -> Dict[str, Any]:
     """

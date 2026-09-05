@@ -86,7 +86,7 @@ python backend/prioritization_engine.py
 python backend/block_solver.py
 ```
 
-### 4. Run Automated Test Suite (37 Tests)
+### 4. Run Automated Test Suite (39 Tests)
 ```powershell
 pytest -v tests/
 ```
@@ -223,7 +223,7 @@ Executed via `pytest -v tests/`:
 - **`tests/test_database.py`** (6 tests): SQLite creation, column schemas, foreign key pragmas, centralized config.
 - **`tests/test_mock_data.py`** (6 tests): Exact row counts, collision seeds, timetable integrity.
 - **`tests/test_prioritization.py`** (6 tests): Criticality math, Random Forest training, priority weight modification, localized XAI attributions.
-- **`tests/test_solver.py`** (6 tests): CP-SAT non-overlap, 10-minute headrooms, bundling savings, manual reschedule persistence.
+- **`tests/test_solver.py`** (8 tests): CP-SAT non-overlap, 10-minute headrooms, bundling savings, manual reschedule persistence, impossible block resilience, emergency enforcement.
 - **`tests/test_simulator.py`** (4 tests): Traffic impact evaluation, delay cascade detection.
 - **`tests/test_advanced_enhancements.py`** (9 tests): Pareto generation, RUL math, distributed decomposition, and crew leveling.
-- **Status: 37 / 37 passed in ~3 seconds.**
+- **Status: 39 / 39 passed in ~3 seconds.**

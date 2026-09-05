@@ -223,3 +223,90 @@ def test_manual_reschedule_persistence_and_audit():
     cursor.execute("DELETE FROM decision_audit WHERE audit_id = ?", (audit_id,))
     conn.commit()
     conn.close()
+
+
+def test_solver_handles_impossible_block_without_crashing_entire_corridor():
+    """
+    Critical Resilience Verification:
+    If one routine block has no legal gap in dense train traffic within its shift window,
+    the solver MUST NOT fail the entire corridor (infeasible).
+    Instead, it must schedule all feasible blocks and defer the impossible block.
+    """
+    from backend.block_solver import build_and_solve_block_schedule
+
+    # Block 1: Impossible routine block on Segment 10 (requires 120m gap, trains packed)
+    # Block 2: Feasible routine block on Segment 20 (zero trains)
+    block_requests = [
+        {
+            "block_id": "BLK_TIGHT_01",
+            "department": "Engineering",
+            "block_type": "Routine",
+            "segment_id": "SEG_010",
+            "km_start": 10.0,
+            "km_end": 11.0,
+            "requested_start_min": 600,  # 10:00
+            "duration_min": 120,
+            "priority_weight": 20.0,
+            "work_description": "Routine Sleeper Packing",
+        },
+        {
+            "block_id": "BLK_FEASIBLE_02",
+            "department": "Signal",
+            "block_type": "Routine",
+            "segment_id": "SEG_020",
+            "km_start": 20.0,
+            "km_end": 21.0,
+            "requested_start_min": 600,  # 10:00
+            "duration_min": 60,
+            "priority_weight": 30.0,
+            "work_description": "Routine Signal Inspection",
+        },
+    ]
+
+    # Trains packed on Segment 10 across shift window leaving no 120m+headway gap
+    train_passages = [
+        {"entry_id": "TRN_WALL_1", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 450, "departure_min": 500},
+        {"entry_id": "TRN_WALL_2", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 530, "departure_min": 580},
+        {"entry_id": "TRN_WALL_3", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 610, "departure_min": 660},
+        {"entry_id": "TRN_WALL_4", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 690, "departure_min": 740},
+        {"entry_id": "TRN_WALL_5", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 760, "departure_min": 800},
+    ]
+
+    results = build_and_solve_block_schedule(block_requests, train_passages)
+
+    # Must succeed (NOT INFEASIBLE!)
+    assert results["success"] is True, f"Expected success=True, got {results['status']}"
+    assert "BLK_FEASIBLE_02" in results["scheduled_blocks"]
+    assert "BLK_TIGHT_01" in results["unscheduled_blocks"]
+    assert results["unscheduled_blocks"]["BLK_TIGHT_01"]["is_scheduled"] is False
+    assert "No conflict-free" in results["unscheduled_blocks"]["BLK_TIGHT_01"]["reason"]
+
+
+def test_emergency_block_strictly_enforced():
+    """Verify that Emergency blocks cannot be dropped, and report infeasibility if truly impossible."""
+    from backend.block_solver import build_and_solve_block_schedule
+
+    emergency_block = [{
+        "block_id": "BLK_EMG_BLOCKED",
+        "department": "Engineering",
+        "block_type": "Emergency",
+        "segment_id": "SEG_010",
+        "km_start": 10.0,
+        "km_end": 11.0,
+        "requested_start_min": 600,
+        "duration_min": 120,
+        "priority_weight": 95.0,
+        "work_description": "Emergency Rail Fracture",
+    }]
+
+    train_passages = [
+        {"entry_id": "TRN_WALL_1", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 450, "departure_min": 500},
+        {"entry_id": "TRN_WALL_2", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 530, "departure_min": 580},
+        {"entry_id": "TRN_WALL_3", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 610, "departure_min": 660},
+        {"entry_id": "TRN_WALL_4", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 690, "departure_min": 740},
+        {"entry_id": "TRN_WALL_5", "route_km_start": 9.0, "route_km_end": 12.0, "arrival_min": 760, "departure_min": 800},
+    ]
+
+    results = build_and_solve_block_schedule(emergency_block, train_passages)
+    assert results["success"] is False
+    assert results["status"] == "INFEASIBLE"

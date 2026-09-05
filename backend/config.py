@@ -9,7 +9,7 @@ import os
 TARGET_DATE_STR = "2026-09-08"
 SCHEDULE_HORIZON_MINUTES = 1440
 DEFAULT_HEADWAY_BUFFER_MINUTES = 10
-MAX_SHIFT_MINUTES = 140
+MAX_SHIFT_MINUTES = 180
 
 # Base directories
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
