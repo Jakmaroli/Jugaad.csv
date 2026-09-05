@@ -1,0 +1,25 @@
+# Core Data & ML
+numpy==1.26.4
+pandas==2.1.4
+scikit-learn==1.3.2
+xgboost==2.0.3
+joblib==1.3.2
+
+# Optimization
+ortools==9.7.2996
+
+# Database
+sqlalchemy==2.0.23
+
+# Visualization & UI
+streamlit==1.28.0
+plotly==5.18.0
+matplotlib==3.8.2
+streamlit-aggrid==0.3.4
+
+# XAI (lightweight - feature importance, not a full SHAP integration)
+shap==0.44.0
+
+# Utilities
+python-dateutil==2.8.2
+pydantic==2.5.3
