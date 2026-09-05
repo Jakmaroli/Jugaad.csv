@@ -44,10 +44,10 @@ from backend.database_schema import (
     BDMSBlock,
     DecisionAudit,
 )
+from backend.config import TARGET_DATE_STR
 
 # Seed for absolute reproducibility
 RANDOM_SEED = 42
-TARGET_DATE_STR = "2026-09-08"
 
 
 def populate_corridor_data(engine: Optional[Engine] = None, seed: int = RANDOM_SEED):

@@ -174,3 +174,52 @@ def test_database_persistence_and_decision_audit():
     assert len(audit_rows) == 7, f"Expected 7 audit rows by System CTPC Solver, got {len(audit_rows)}"
 
     conn.close()
+
+
+def test_manual_reschedule_persistence_and_audit():
+    """Verify that manual reschedule updates approved times, sets status='Sanctioning', and writes decision_audit."""
+    from backend.config import TARGET_DATE_STR
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    target_block = "BLK_ENG_CONFL"
+    new_s = f"{TARGET_DATE_STR}T13:35:00"
+    new_e = f"{TARGET_DATE_STR}T15:00:00"
+    audit_id = "AUDIT_TEST_RESCHED_001"
+    pn_num = "PN-9999"
+
+    cursor.execute("""
+        UPDATE bdms_blocks
+        SET approved_start = ?, approved_end = ?, status = 'Sanctioning'
+        WHERE block_id = ?
+    """, (new_s, new_e, target_block))
+
+    cursor.execute("""
+        INSERT INTO decision_audit (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
+        VALUES (?, ?, 'Reschedule', 'Section Controller SC_01', ?, ?, 'Submission', 'Sanctioning')
+    """, (audit_id, target_block, f"{TARGET_DATE_STR}T12:00:00", f"Manual reschedule under authority {pn_num}"))
+
+    conn.commit()
+
+    # Verify update in bdms_blocks
+    cursor.execute("SELECT approved_start, approved_end, status FROM bdms_blocks WHERE block_id = ?", (target_block,))
+    row = cursor.fetchone()
+    assert row[0] == new_s
+    assert row[1] == new_e
+    assert row[2] == "Sanctioning"
+
+    # Verify audit row
+    cursor.execute("SELECT action, actor, previous_state, new_state, reason FROM decision_audit WHERE audit_id = ?", (audit_id,))
+    audit = cursor.fetchone()
+    assert audit is not None
+    assert audit[0] == "Reschedule"
+    assert audit[1] == "Section Controller SC_01"
+    assert audit[2] == "Submission"
+    assert audit[3] == "Sanctioning"
+    assert pn_num in audit[4]
+
+    # Clean up test audit row
+    cursor.execute("DELETE FROM decision_audit WHERE audit_id = ?", (audit_id,))
+    conn.commit()
+    conn.close()

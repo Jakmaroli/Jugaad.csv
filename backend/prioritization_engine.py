@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database_schema import get_db_path, get_engine
+from backend.config import TARGET_DATE_STR
 
 
 # -----------------------------------------------------------------------------
@@ -97,7 +98,7 @@ def compute_rule_based_criticality(
 # -----------------------------------------------------------------------------
 # Data Ingestion & Unification
 # -----------------------------------------------------------------------------
-def load_unified_defects(db_path: Optional[str] = None, ref_date: str = "2026-09-08") -> pd.DataFrame:
+def load_unified_defects(db_path: Optional[str] = None, ref_date: str = TARGET_DATE_STR) -> pd.DataFrame:
     """
     Ingest all active defects from TMS, SMMS, and TDMS, joining track segment metadata.
     """

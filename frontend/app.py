@@ -39,6 +39,7 @@ from backend.distributed_decomposer import benchmark_centralized_vs_decomposed
 from backend.resource_leveling import get_resource_allocation_timeline, solve_with_resource_leveling, DIVISION_RESOURCES
 from backend.baseline import compare_baseline_vs_cpsat
 from backend.prioritization_engine import compute_local_block_explanation
+from backend.config import TARGET_DATE_STR
 
 # -----------------------------------------------------------------------------
 # Streamlit Page Configuration & Modern Railway Theme CSS
@@ -689,21 +690,69 @@ if col_btn2.button("❌ Reject Block", use_container_width=True):
     st.sidebar.warning(f"Block {selected_block_id} has been REJECTED.")
     st.rerun()
 
-# Action 3: Simulate Manual Reschedule
+# Action 3: Simulate & Confirm Manual Reschedule
 st.sidebar.markdown("---")
-st.sidebar.write("### ⏱️ Manual Reschedule Simulator")
-custom_s = st.sidebar.text_input("Custom Start Time (HH:MM):", value="10:30")
-custom_e = st.sidebar.text_input("Custom End Time (HH:MM):", value="12:00")
+st.sidebar.write("### ⏱️ Manual Reschedule Tool")
+custom_s = st.sidebar.text_input("New Start Time (HH:MM):", value="13:35")
+custom_e = st.sidebar.text_input("New End Time (HH:MM):", value="15:00")
 
-if st.sidebar.button("🔍 Simulate Manual Reschedule", use_container_width=True):
-    res = simulate_segment_traffic_impact(
-        segment_id=selected_block["segment_id"],
-        custom_blocks=[{"block_id": selected_block_id, "start": custom_s, "end": custom_e}],
-    )
-    if res["is_conflict_free"]:
-        st.sidebar.success(f"✅ Safe schedule! 0 mins delay on {selected_block['segment_id']}.")
+def is_valid_hhmm(val: str) -> bool:
+    try:
+        parts = val.strip().split(":")
+        if len(parts) != 2:
+            return False
+        h, m = int(parts[0]), int(parts[1])
+        return 0 <= h <= 23 and 0 <= m <= 59
+    except Exception:
+        return False
+
+time_valid = is_valid_hhmm(custom_s) and is_valid_hhmm(custom_e)
+
+if not time_valid:
+    st.sidebar.error("⚠️ Invalid format! Please enter valid 24h HH:MM (e.g. 10:30, 14:00).")
+else:
+    s_min = int(custom_s.split(":")[0]) * 60 + int(custom_s.split(":")[1])
+    e_min = int(custom_e.split(":")[0]) * 60 + int(custom_e.split(":")[1])
+    if s_min >= e_min:
+        st.sidebar.error("⚠️ Start time must be strictly earlier than end time.")
     else:
-        st.sidebar.error(f"⚠️ ALERT: Collision Detected!\nPrimary Delay: {res['total_primary_delay_minutes']}m | Cascade: {res['total_cascade_delay_minutes']}m")
-        for t in res["affected_trains"]:
-            if t["has_delay"]:
-                st.sidebar.warning(f"🚨 {t['train_name']} ({t['train_number']}): Delayed by {t['total_delay_mins']}m (Arrive {t['actual_arrival']})")
+        # Step A: Preview conflict impact
+        res = simulate_segment_traffic_impact(
+            segment_id=selected_block["segment_id"],
+            custom_blocks=[{"block_id": selected_block_id, "start": custom_s.strip(), "end": custom_e.strip()}],
+        )
+        if res["is_conflict_free"]:
+            st.sidebar.success(f"✅ Verified Safe: 0 mins delay on {selected_block['segment_id']}.")
+            
+            # Step B: Confirm & Persist Action (P0 Requirement)
+            if st.sidebar.button("💾 Confirm & Persist Reschedule", use_container_width=True):
+                private_num = f"PN-{random.randint(1000, 9999)}"
+                app_s_iso = f"{TARGET_DATE_STR}T{custom_s.strip()}:00"
+                app_e_iso = f"{TARGET_DATE_STR}T{custom_e.strip()}:00"
+                
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE bdms_blocks
+                    SET approved_start = ?, approved_end = ?, status = 'Sanctioning'
+                    WHERE block_id = ?
+                """, (app_s_iso, app_e_iso, selected_block_id))
+                
+                audit_id = f"AUDIT_RESCHED_{selected_block_id}_{random.randint(100, 999)}"
+                now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                reason = f"Section Controller manually rescheduled possession to {custom_s}-{custom_e} under authority {private_num}. Verified zero train conflicts."
+                
+                cursor.execute("""
+                    INSERT INTO decision_audit (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
+                    VALUES (?, ?, 'Reschedule', 'Section Controller SC_01', ?, ?, ?, 'Sanctioning')
+                """, (audit_id, selected_block_id, now_str, reason, selected_block["status"]))
+                
+                conn.commit()
+                conn.close()
+                st.sidebar.success(f"🎉 Block {selected_block_id} rescheduled under {private_num}!")
+                st.rerun()
+        else:
+            st.sidebar.error(f"⚠️ ALERT: Collision Detected!\nPrimary Delay: {res['total_primary_delay_minutes']}m | Cascade: {res['total_cascade_delay_minutes']}m")
+            for t in res["affected_trains"]:
+                if t["has_delay"]:
+                    st.sidebar.warning(f"🚨 {t['train_name']} ({t['train_number']}): Delayed by {t['total_delay_mins']}m (Arrive {t['actual_arrival']})")

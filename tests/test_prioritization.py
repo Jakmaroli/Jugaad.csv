@@ -22,6 +22,7 @@ from backend.prioritization_engine import (
     train_ml_risk_predictor,
     ensure_priority_weight_column,
     update_block_priorities,
+    compute_local_block_explanation,
 )
 
 
@@ -162,3 +163,25 @@ def test_segment_35_emergency_block_priority():
     assert priority_weight >= 90.0, (
         f"BLK_ENG_CONFL priority weight {priority_weight} is less than 90.0"
     )
+
+
+def test_local_xai_explanation_all_blocks():
+    """Verify that localized feature attribution computes dynamically for all blocks without hardcoded canned strings."""
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT block_id, priority_weight FROM bdms_blocks")
+    blocks = cursor.fetchall()
+    conn.close()
+
+    assert len(blocks) >= 7
+    for block_id, p_weight in blocks:
+        exp = compute_local_block_explanation(block_id, db_path)
+        assert exp["block_id"] == block_id
+        assert exp["final_priority_weight"] == pytest.approx(float(p_weight), abs=0.1)
+        assert len(exp["components"]) >= 5
+        # Verify component structure
+        for comp in exp["components"]:
+            assert "feature" in comp
+            assert "value" in comp
+            assert "description" in comp

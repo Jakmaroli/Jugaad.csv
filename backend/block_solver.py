@@ -24,8 +24,7 @@ from ortools.sat.python import cp_model
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database_schema import get_db_path
-
-TARGET_DATE_STR = "2026-09-08"
+from backend.config import TARGET_DATE_STR
 
 
 def time_to_minutes(dt_str: str) -> int:

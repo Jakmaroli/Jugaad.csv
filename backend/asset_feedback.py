@@ -24,6 +24,7 @@ from typing import Dict, List, Any, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database_schema import get_db_path
+from backend.config import TARGET_DATE_STR
 
 
 def calculate_asset_rul(tgi: float, yearly_gmt: float, base_rul_days: float = 180.0) -> float:
@@ -162,9 +163,9 @@ def execute_asset_feedback_loop(
     cur.execute("""
         UPDATE tms_track_assets
         SET tgi_index = ?, active_psr_km = NULL, psr_speed_kmph = NULL,
-            last_inspection_date = '2026-09-08'
+            last_inspection_date = ?
         WHERE segment_id = ?
-    """, (new_tgi, seg_id))
+    """, (new_tgi, TARGET_DATE_STR, seg_id))
 
     # 3. Mark corresponding defects as Rectified / Resolved
     cur.execute("""
@@ -190,8 +191,7 @@ def execute_asset_feedback_loop(
     rul_after = calculate_asset_rul(new_tgi, yearly_gmt)
 
     # 5. Log to decision_audit
-    # Align timestamp with operational horizon 2026-09-08
-    now_iso = f"2026-09-08T{datetime.now().strftime('%H:%M:%S')}"
+    now_iso = f"{TARGET_DATE_STR}T{datetime.now().strftime('%H:%M:%S')}"
     audit_id = f"AUDIT_FEEDBACK_{block_id}_{random.randint(1000, 9999)}"
     reason = (
         f"Dynamic Feedback Loop: Possession granted under {private_number}. "

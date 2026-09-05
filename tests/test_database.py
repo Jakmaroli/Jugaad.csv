@@ -99,3 +99,11 @@ def test_foreign_key_constraint_enforcement():
                 "VALUES ('DUMMY_DEF_999', 'NON_EXISTENT_SEG', 999.0, 'Test Defect', 'Routine', '2026-09-08', 'Open')"
             )
             conn.commit()
+
+
+def test_centralized_target_date_config():
+    """Verify that centralized configuration module provides the single source of truth for TARGET_DATE_STR."""
+    from backend.config import TARGET_DATE_STR, SCHEDULE_HORIZON_MINUTES, DEFAULT_HEADWAY_BUFFER_MINUTES
+    assert TARGET_DATE_STR == "2026-09-08"
+    assert SCHEDULE_HORIZON_MINUTES == 1440
+    assert DEFAULT_HEADWAY_BUFFER_MINUTES == 10
