@@ -21,3 +21,7 @@ pytest==7.4.3
 # Utilities
 python-dateutil==2.8.2
 pydantic==2.5.3
+
+# Backend API
+fastapi==0.141.1
+uvicorn==0.52.4
