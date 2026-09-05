@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Service 1: RailFlow Advisory Cockpit (Streamlit Frontend)
+  # ---------------------------------------------------------------------------
+  cockpit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: railflow_cockpit
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persistent host volume mount for SQLite database
+      - ./data:/app/data
+      - ./out:/app/out
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8501
+      - DATABASE_URL=sqlite:////app/data/block_planning.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - railflow_net
+
+  # ---------------------------------------------------------------------------
+  # Service 2: RailFlow High-Performance Optimization & REST API Backend
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: railflow_api
+    restart: unless-stopped
+    command: ["uvicorn", "backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent host volume mount for SQLite database
+      - ./data:/app/data
+      - ./out:/app/out
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8000
+      - DATABASE_URL=sqlite:////app/data/block_planning.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - railflow_net
+
+networks:
+  railflow_net:
+    driver: bridge

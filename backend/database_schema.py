@@ -10,8 +10,11 @@ Defines SQLite database models using SQLAlchemy representing Indian Railways dom
 """
 
 import os
+import random
 import sqlite3
+from datetime import datetime
 from typing import Dict, Optional, Any
+from backend.config import TARGET_DATE_STR
 from sqlalchemy import (
     Column,
     String,
@@ -400,6 +403,81 @@ def inject_emergency_defect(
         "priority_weight": 95.0,
         "solver_results": solver_res,
         "message": f"Emergency Block {blk_id} granted at Km {km_location}. Lower priority tasks rescheduled.",
+    }
+
+
+def submit_maintenance_block_request(
+    department: str,
+    block_type: str,
+    segment_id: str,
+    km_start: float,
+    km_end: float,
+    requested_start_time: str,
+    requested_end_time: str,
+    work_description: str,
+    resource_details: str = "Standard Maintenance Gang",
+    actor: str = "Track Engineer TE_01",
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Role-Based Action for Track Engineers (RBAC):
+    Allows field engineers to submit formal maintenance block requests into bdms_blocks
+    with status 'Submission' and writes a statutory audit entry into decision_audit.
+    """
+    resolved_path = get_db_path(db_path)
+    engine = get_engine(resolved_path)
+
+    blk_id = f"BLK_{department[:3].upper()}_{random.randint(1000, 9999)}"
+    audit_id = f"AUDIT_SUB_{blk_id}_{random.randint(100, 999)}"
+    now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Format ISO timestamps
+    req_s_iso = f"{TARGET_DATE_STR}T{requested_start_time.strip()}:00" if "T" not in requested_start_time else requested_start_time
+    req_e_iso = f"{TARGET_DATE_STR}T{requested_end_time.strip()}:00" if "T" not in requested_end_time else requested_end_time
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO bdms_blocks (
+                block_id, department, block_type, status, segment_id,
+                km_start, km_end, requested_start, requested_end,
+                work_description, resource_details, created_at, priority_weight
+            ) VALUES (
+                :bid, :dept, :btype, 'Submission', :seg,
+                :km_s, :km_e, :req_s, :req_e,
+                :desc, :res, :now, 50.0
+            )
+        """), {
+            "bid": blk_id,
+            "dept": department,
+            "btype": block_type,
+            "seg": segment_id,
+            "km_s": km_start,
+            "km_e": km_end,
+            "req_s": req_s_iso,
+            "req_e": req_e_iso,
+            "desc": work_description,
+            "res": resource_details,
+            "now": now_str,
+        })
+
+        conn.execute(text("""
+            INSERT INTO decision_audit (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
+            VALUES (:aid, :bid, 'Submission', :actor, :now, :reason, 'None', 'Submission')
+        """), {
+            "aid": audit_id,
+            "bid": blk_id,
+            "actor": actor,
+            "now": now_str,
+            "reason": f"New maintenance demand submitted by {actor} for {work_description}.",
+        })
+
+    return {
+        "success": True,
+        "block_id": blk_id,
+        "status": "Submission",
+        "actor": actor,
+        "audit_id": audit_id,
+        "message": f"Block demand {blk_id} successfully submitted by {actor}.",
     }
 
 

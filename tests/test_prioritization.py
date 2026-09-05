@@ -23,7 +23,18 @@ from backend.prioritization_engine import (
     ensure_priority_weight_column,
     update_block_priorities,
     compute_local_block_explanation,
+    run_prioritization_pipeline,
 )
+from backend.mock_data_generator import populate_corridor_data
+from backend.block_solver import run_solver_pipeline
+
+
+@pytest.fixture(autouse=True)
+def setup_prioritization_database():
+    """Ensure tests run against a pristine corridor database."""
+    populate_corridor_data()
+    run_prioritization_pipeline()
+    run_solver_pipeline()
 
 
 def test_rule_based_criticality_math():
