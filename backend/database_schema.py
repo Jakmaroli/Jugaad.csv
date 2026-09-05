@@ -11,7 +11,7 @@ Defines SQLite database models using SQLAlchemy representing Indian Railways dom
 
 import os
 import sqlite3
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from sqlalchemy import (
     Column,
     String,
@@ -320,6 +320,87 @@ def get_table_counts(engine: Optional[Engine] = None) -> Dict[str, int]:
             except Exception:
                 counts[t] = 0
     return counts
+
+
+def inject_emergency_defect(
+    segment_id: str = "SEG_042",
+    km_location: float = 42.4,
+    defect_desc: str = "Km 42.4 Severe Rail Fracture detected by USFD trolley",
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    1-Click Live Emergency Defect Injection (SIH26027 Task 5):
+    - Inserts critical rail fracture into tms_defects with Express severity and priority 95.0.
+    - Creates corresponding Emergency block in bdms_blocks that bypasses standard queue.
+    - Logs statutory trigger in decision_audit.
+    - Re-triggers CP-SAT solver pipeline to reschedule lower-priority tasks around it.
+    """
+    import random
+    from datetime import datetime
+    from backend.config import TARGET_DATE_STR
+
+    resolved_path = get_db_path(db_path)
+    engine = get_engine(resolved_path)
+
+    def_id = f"DEF_EMG_{random.randint(1000, 9999)}"
+    blk_id = f"BLK_EMG_{random.randint(1000, 9999)}"
+    audit_id = f"AUDIT_EMG_{random.randint(1000, 9999)}"
+    now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    with engine.begin() as conn:
+        # 1. Insert into tms_defects
+        conn.execute(text("""
+            INSERT INTO tms_defects (defect_id, segment_id, km_post, defect_type, severity, detected_date, status, suggested_action)
+            VALUES (:did, :seg, :km_post, 'Rail Fracture', 'Express', :dt, 'Open', 'Immediate Emergency Track Possession')
+        """), {"did": def_id, "seg": segment_id, "km_post": km_location, "dt": TARGET_DATE_STR})
+
+        # 2. Insert into bdms_blocks with Emergency block_type and priority 95.0
+        conn.execute(text("""
+            INSERT INTO bdms_blocks (
+                block_id, department, block_type, status, segment_id,
+                km_start, km_end, requested_start, requested_end,
+                work_description, resource_details, created_at, priority_weight
+            ) VALUES (
+                :bid, 'Engineering', 'Emergency', 'Submission', :seg,
+                :km_s, :km_e, :req_s, :req_e,
+                :desc, 'Emergency Gang 04, Rail Cutting Machine', :now, 95.0
+            )
+        """), {
+            "bid": blk_id,
+            "seg": segment_id,
+            "km_s": km_location - 0.5,
+            "km_e": km_location + 0.5,
+            "req_s": f"{TARGET_DATE_STR}T10:30:00",
+            "req_e": f"{TARGET_DATE_STR}T12:00:00",
+            "desc": f"{defect_desc} (Urgent Track Possession)",
+            "now": now_str,
+        })
+
+        # 3. Log into decision_audit
+        conn.execute(text("""
+            INSERT INTO decision_audit (audit_id, block_id, action, actor, timestamp, reason, previous_state, new_state)
+            VALUES (:aid, :bid, 'Emergency Injection', 'USFD Sensor Telemetry', :now, :reason, 'None', 'Submission')
+        """), {
+            "aid": audit_id,
+            "bid": blk_id,
+            "now": now_str,
+            "reason": f"Urgent safety risk: {defect_desc}. Priority 95.0 assigned. Immediate preemption required.",
+        })
+
+    # 4. Re-run solver pipeline to reschedule lower-priority tasks
+    from backend.block_solver import run_solver_pipeline
+    solver_res = run_solver_pipeline(db_path=resolved_path)
+
+    return {
+        "success": True,
+        "defect_id": def_id,
+        "block_id": blk_id,
+        "segment_id": segment_id,
+        "km_location": km_location,
+        "priority_weight": 95.0,
+        "solver_results": solver_res,
+        "message": f"Emergency Block {blk_id} granted at Km {km_location}. Lower priority tasks rescheduled.",
+    }
 
 
 if __name__ == "__main__":

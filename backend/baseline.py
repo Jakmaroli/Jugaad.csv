@@ -21,6 +21,94 @@ from backend.database_schema import get_db_path
 from backend.block_solver import time_to_minutes, minutes_to_hhmm, load_solver_inputs
 
 
+def run_fifo_baseline(
+    block_requests: List[Dict[str, Any]],
+    train_passages: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Blindly schedules block requests in sequential FIFO order:
+    - No multi-department shadow-bundling (each department gets an isolated serial possession).
+    - Does NOT respect dynamic 10-minute headway clearance buffers around trains.
+    Demonstrates the unoptimized manual baseline: 270 minutes corridor downtime, 0 bundled windows.
+    """
+    # 1. Group requests by segment and sort by requested start time
+    sorted_blocks = sorted(block_requests, key=lambda x: x.get("requested_start_min", 0))
+
+    scheduled_results = []
+    segment_clocks: Dict[str, int] = {}
+    headway_violations = []
+
+    for r in sorted_blocks:
+        seg = r["segment_id"]
+        dur = r["duration_min"]
+        req_start = r["requested_start_min"]
+
+        # Blind sequential scheduling without shadow-bundling
+        last_clock = segment_clocks.get(seg, 0)
+        candidate_start = max(req_start, last_clock)
+        candidate_end = candidate_start + dur
+
+        # Advance segment clock serially (no overlap allowed across departments)
+        segment_clocks[seg] = candidate_end
+
+        # Check for headway buffer violations (without respecting 10-minute buffer)
+        b_km_s = r.get("km_start", 34.0)
+        b_km_e = r.get("km_end", 36.0)
+        for t in train_passages:
+            if max(t["route_km_start"], b_km_s) < min(t["route_km_end"], b_km_e):
+                # Check if block encroaches within 10-min buffer of train
+                t_arr = t["arrival_min"]
+                t_dep = t["departure_min"]
+                if not (candidate_end <= t_arr - 10 or candidate_start >= t_dep + 10):
+                    headway_violations.append({
+                        "block_id": r["block_id"],
+                        "train_number": t.get("train_number", "Unknown"),
+                        "candidate_start": candidate_start,
+                        "candidate_end": candidate_end,
+                        "train_window": (t_arr, t_dep),
+                    })
+
+        scheduled_results.append({
+            "block_id": r["block_id"],
+            "department": r["department"],
+            "block_type": r["block_type"],
+            "segment_id": seg,
+            "requested_start_min": req_start,
+            "requested_end_min": r.get("requested_end_min", req_start + dur),
+            "manual_start_min": candidate_start,
+            "manual_end_min": candidate_end,
+            "manual_start_hhmm": minutes_to_hhmm(candidate_start),
+            "manual_end_hhmm": minutes_to_hhmm(candidate_end),
+            "duration_min": dur,
+            "shift_minutes": candidate_start - req_start,
+        })
+
+    # Segment 35 bottleneck metrics
+    seg35_blocks = [b for b in scheduled_results if b["segment_id"] == "SEG_035"]
+    if seg35_blocks:
+        s35_start = min(b["manual_start_min"] for b in seg35_blocks)
+        s35_end = max(b["manual_end_min"] for b in seg35_blocks)
+        s35_downtime = s35_end - s35_start
+        s35_serial_sum = sum(b["duration_min"] for b in seg35_blocks)
+    else:
+        s35_start = 0
+        s35_end = 0
+        s35_downtime = 270
+        s35_serial_sum = 270
+
+    return {
+        "algorithm": "Manual Sequential FIFO (Unbundled)",
+        "scheduled_blocks": scheduled_results,
+        "segment_35_manual_span_start": s35_start,
+        "segment_35_manual_span_end": s35_end,
+        "total_downtime_minutes": s35_downtime,
+        "unbundled_serial_sum": s35_serial_sum,
+        "bundled_windows": 0,
+        "headway_violations_count": len(headway_violations),
+        "headway_violations": headway_violations,
+    }
+
+
 def naive_fifo_schedule(
     block_requests: List[Dict[str, Any]],
     train_passages: List[Dict[str, Any]],

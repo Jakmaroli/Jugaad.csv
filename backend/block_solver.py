@@ -126,6 +126,7 @@ def build_and_solve_block_schedule(
     max_shift_minutes: int = MAX_SHIFT_MINUTES,
     headway_buffer_minutes: int = DEFAULT_HEADWAY_BUFFER_MINUTES,
     time_limit_seconds: int = 10,
+    punctuality_weight: float = 0.7,
 ) -> Dict[str, Any]:
     """
     Formulate and solve CP-SAT model for railway maintenance scheduling.
@@ -237,31 +238,54 @@ def build_and_solve_block_schedule(
             "any_sched": any_sched,
         }
 
-    # 4. Multi-Objective Function
-    # Maximize: Sum((10,000 + 100*priority) * sched) - (20 * Joint Possession Span) - (5 * Shift Minutes)
+    # 4. Multi-Department Overlap Synergy Terms (Civil, Signal, Traction)
+    # The Synergy term explicitly grants a mathematical bonus when Civil (TMS), Signal (SMMS),
+    # and Traction (TDMS) blocks overlap on the same segment.
+    synergy_bonus_terms = []
+    for seg, b_ids in multi_dept_segments.items():
+        for i in range(len(b_ids)):
+            for j in range(i + 1, len(b_ids)):
+                b1 = next(b for b in block_requests if b["block_id"] == b_ids[i])
+                b2 = next(b for b in block_requests if b["block_id"] == b_ids[j])
+                if b1["department"] != b2["department"]:
+                    overlap_var = model.NewBoolVar(f"synergy_{b_ids[i]}_{b_ids[j]}")
+                    b1_before_b2 = model.NewBoolVar(f"{b_ids[i]}_before_{b_ids[j]}")
+                    b2_before_b1 = model.NewBoolVar(f"{b_ids[j]}_before_{b_ids[i]}")
+
+                    model.Add(end_vars[b_ids[i]] <= start_vars[b_ids[j]]).OnlyEnforceIf(b1_before_b2)
+                    model.Add(end_vars[b_ids[j]] <= start_vars[b_ids[i]]).OnlyEnforceIf(b2_before_b1)
+
+                    model.Add(overlap_var == 0).OnlyEnforceIf(b1_before_b2)
+                    model.Add(overlap_var == 0).OnlyEnforceIf(b2_before_b1)
+                    model.Add(overlap_var == 0).OnlyEnforceIf(is_scheduled_vars[b_ids[i]].Not())
+                    model.Add(overlap_var == 0).OnlyEnforceIf(is_scheduled_vars[b_ids[j]].Not())
+
+                    # Co-located multi-department bonus (250 pts per synergy overlap)
+                    synergy_bonus_terms.append(250 * overlap_var)
+
+    # 5. Weighted Sum Multi-Objective Formulation (SIH26027 Task 2):
+    # Maximize: floor((1 - lambda) * 100) * Sum(Priority * Synergy) - floor(lambda * 100) * Sum(Train Delay Penalties)
+    lambda_p = max(0.0, min(1.0, float(punctuality_weight)))
+    w_maint = max(1, int((1.0 - lambda_p) * 100))
+    w_punct = max(1, int(lambda_p * 100))
+
     priority_terms = []
     for b in block_requests:
         b_id = b["block_id"]
-        wt = 10000 + int(b.get("priority_weight", 5.0) * 100)
-        priority_terms.append(wt * is_scheduled_vars[b_id])
+        base_val = 10000 + int(b.get("priority_weight", 5.0) * 100)
+        priority_terms.append(base_val * is_scheduled_vars[b_id])
 
-    span_penalty_terms = []
-    for seg, s_info in span_vars.items():
-        span_penalty_terms.append(20 * s_info["dur"])
+    priority_and_synergy = sum(priority_terms) + sum(synergy_bonus_terms)
 
-    shift_penalty_terms = []
-    for b in block_requests:
-        b_id = b["block_id"]
-        shift_penalty_terms.append(5 * shift_vars[b_id])
+    # Train Delay Penalties: shift deviations + joint possession corridor span
+    shift_penalties = [5 * shift_vars[b["block_id"]] for b in block_requests]
+    span_penalties = [20 * s_info["dur"] for seg, s_info in span_vars.items()]
+    train_delay_penalties = sum(shift_penalties) + sum(span_penalties)
 
-    total_objective = (
-        sum(priority_terms)
-        - sum(span_penalty_terms)
-        - sum(shift_penalty_terms)
-    )
+    total_objective = (w_maint * priority_and_synergy) - (w_punct * train_delay_penalties)
     model.Maximize(total_objective)
 
-    # 5. Solve with CP-SAT
+    # 6. Solve with CP-SAT
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_seconds
     solver.parameters.num_search_workers = 4
@@ -490,10 +514,19 @@ def print_solver_report(solver_results: Dict[str, Any]):
 # -----------------------------------------------------------------------------
 # Main Entry Point
 # -----------------------------------------------------------------------------
-def run_solver_pipeline(db_path: Optional[str] = None) -> Dict[str, Any]:
+def run_solver_pipeline(
+    db_path: Optional[str] = None,
+    time_limit_seconds: int = 10,
+    punctuality_weight: float = 0.7,
+) -> Dict[str, Any]:
     """Execute the full CP-SAT solver and database persistence pipeline."""
     block_requests, train_passages = load_solver_inputs(db_path)
-    results = build_and_solve_block_schedule(block_requests, train_passages)
+    results = build_and_solve_block_schedule(
+        block_requests,
+        train_passages,
+        time_limit_seconds=time_limit_seconds,
+        punctuality_weight=punctuality_weight,
+    )
 
     if results["success"]:
         updated = persist_solver_results_to_database(results, db_path)
