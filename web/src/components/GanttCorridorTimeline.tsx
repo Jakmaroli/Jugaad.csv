@@ -1,7 +1,17 @@
 "use client";
 
 import React, { useState } from "react";
-import { Clock, Train, ShieldCheck, AlertTriangle, Layers, Info, CheckCircle2 } from "lucide-react";
+import {
+  Clock,
+  Train,
+  ShieldCheck,
+  AlertTriangle,
+  Layers,
+  Info,
+  CheckCircle2,
+  Sparkles,
+  MousePointerClick,
+} from "lucide-react";
 
 export interface TrainItem {
   id: string;
@@ -68,8 +78,8 @@ const TOTAL_MINUTES = 360; // 6 hours
 
 function timeToPercent(timeStr: string): number {
   if (!timeStr) return 0;
-  // Format: "YYYY-MM-DDTHH:MM:SS" or "HH:MM"
-  let hh = 0, mm = 0;
+  let hh = 0,
+    mm = 0;
   if (timeStr.includes("T")) {
     const timePart = timeStr.split("T")[1];
     const parts = timePart.split(":");
@@ -119,7 +129,7 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
 
   if (isLoading || !data) {
     return (
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-8 flex flex-col items-center justify-center min-h-[360px] animate-pulse">
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[380px] animate-pulse">
         <Clock className="w-8 h-8 text-sky-400 mb-3 animate-spin" />
         <span className="text-slate-400 font-mono text-sm">Computing Corridor Time-Space Gantt Matrix...</span>
       </div>
@@ -137,24 +147,28 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
   const windowWidth = timeToPercent("13:35") - windowLeft;
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-5 shadow-xl relative backdrop-blur-md">
+    <div className="bg-slate-900/95 border border-slate-800/80 rounded-2xl p-5 shadow-2xl relative backdrop-blur-xl">
       {/* Header bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800 gap-3">
         <div className="flex items-center space-x-3">
-          <div className="p-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400">
+          <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 shadow-sm">
             <Layers className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="text-base font-semibold text-white tracking-wide">
-                Corridor Time-Space Possession Gantt
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-wide">
+                CORRIDOR TIME-SPACE POSSESSION MATRIX
               </h3>
               <span className="px-2 py-0.5 text-xs font-mono font-medium rounded-full bg-sky-950/80 text-sky-300 border border-sky-700/50">
-                Segment 35 Bottleneck (KM 34.0 - 36.0)
+                Segment 35 Bottleneck (Km 34.0–36.0)
               </span>
             </div>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              CP-SAT Bundled Multi-Disciplinary Window: 11:35 – 13:35 (120 min) • 0 Delay Incurred
+            <p className="text-xs text-slate-400 font-mono mt-0.5 flex items-center gap-2">
+              <span className="text-emerald-400 font-semibold">
+                CP-SAT Co-located Window: 11:35 – 13:35 (120 min)
+              </span>
+              <span>•</span>
+              <span className="text-slate-300">0 Delay Incurred</span>
             </p>
           </div>
         </div>
@@ -162,35 +176,35 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
         {/* Legend */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded bg-sky-500 inline-block shadow-sm"></span>
+            <span className="w-2.5 h-2.5 rounded bg-sky-400 inline-block shadow-sm"></span>
             <span className="text-slate-300">Passenger Trains</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded bg-amber-500 inline-block shadow-sm"></span>
+            <span className="w-2.5 h-2.5 rounded bg-amber-400 inline-block shadow-sm"></span>
             <span className="text-slate-300">Freight Trains</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded bg-emerald-500 inline-block shadow-sm"></span>
-            <span className="text-slate-300">Engineering</span>
+            <span className="w-2.5 h-2.5 rounded bg-emerald-400 inline-block shadow-sm"></span>
+            <span className="text-slate-300">Civil Eng</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded bg-blue-500 inline-block shadow-sm"></span>
-            <span className="text-slate-300">Signal (S&T)</span>
+            <span className="w-2.5 h-2.5 rounded bg-blue-400 inline-block shadow-sm"></span>
+            <span className="text-slate-300">Signal S&T</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded bg-pink-500 inline-block shadow-sm"></span>
-            <span className="text-slate-300">Traction (TRD)</span>
+            <span className="w-2.5 h-2.5 rounded bg-pink-400 inline-block shadow-sm"></span>
+            <span className="text-slate-300">Traction TRD</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded bg-red-500/80 border border-red-400 inline-block"></span>
-            <span className="text-red-400">Pre-Opt Collisions</span>
+            <span className="w-2.5 h-2.5 rounded bg-rose-500 border border-rose-400 inline-block"></span>
+            <span className="text-rose-400 font-semibold">Naive Collisions</span>
           </div>
         </div>
       </div>
 
-      {/* Timeline container */}
-      <div className="mt-5 relative select-none overflow-x-auto pb-4">
-        <div className="min-w-[760px] relative">
+      {/* Timeline container with horizontal scroll support */}
+      <div className="mt-4 relative select-none overflow-x-auto pb-2">
+        <div className="min-w-[820px] relative">
           {/* Time axis header */}
           <div className="relative h-7 border-b border-slate-800 flex items-center">
             {timeMarks.map((tm, idx) => {
@@ -201,7 +215,7 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
                   className="absolute transform -translate-x-1/2 flex flex-col items-center"
                   style={{ left: `${leftPct}%` }}
                 >
-                  <span className="text-[11px] font-mono text-slate-400">{tm.label}</span>
+                  <span className="text-[11px] font-mono text-slate-400 font-semibold">{tm.label}</span>
                   <div className="w-[1px] h-2 bg-slate-700 mt-0.5"></div>
                 </div>
               );
@@ -209,7 +223,7 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
           </div>
 
           {/* Timeline Grid Background */}
-          <div className="relative h-64 border-b border-slate-800 bg-slate-950/40 rounded-b-lg overflow-hidden">
+          <div className="relative h-64 border-b border-slate-800 bg-slate-950/60 rounded-b-xl overflow-hidden">
             {/* Grid vertical lines */}
             {timeMarks.map((tm, idx) => {
               const leftPct = (tm.min / TOTAL_MINUTES) * 100;
@@ -224,46 +238,49 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
 
             {/* CP-SAT Optimal Shadow Zone Highlight */}
             <div
-              className="absolute top-0 bottom-0 bg-emerald-500/5 border-l-2 border-r-2 border-dashed border-emerald-500/40 pointer-events-none transition-all"
+              className="absolute top-0 bottom-0 bg-emerald-500/10 border-l-2 border-r-2 border-dashed border-emerald-500/50 pointer-events-none transition-all"
               style={{ left: `${windowLeft}%`, width: `${windowWidth}%` }}
             >
-              <div className="absolute top-2 left-2 flex items-center space-x-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-600/50 text-[10px] font-mono text-emerald-300">
-                <ShieldCheck className="w-3 h-3 mr-1" />
-                <span>CP-SAT CO-LOCATED SHADOW SLOT</span>
+              <div className="absolute top-2 left-2 flex items-center space-x-1 px-2 py-0.5 rounded bg-emerald-950/90 border border-emerald-500/60 text-[10px] font-mono text-emerald-300 shadow">
+                <ShieldCheck className="w-3 h-3 mr-1 text-emerald-400" />
+                <span className="font-bold">CP-SAT CO-LOCATED SHADOW SLOT</span>
               </div>
             </div>
 
             {/* Safety Headway Buffers (10-min caution bands) */}
             <div
-              className="absolute top-0 bottom-0 bg-amber-500/10 border-l border-amber-500/30 pointer-events-none"
+              className="absolute top-0 bottom-0 bg-amber-500/15 border-l border-amber-500/40 pointer-events-none"
               style={{ left: `${bufferStartLeft}%`, width: `${bufferStartWidth}%` }}
               title="10-min Ingress Safety Headway Buffer"
             />
             <div
-              className="absolute top-0 bottom-0 bg-amber-500/10 border-r border-amber-500/30 pointer-events-none"
+              className="absolute top-0 bottom-0 bg-amber-500/15 border-r border-amber-500/40 pointer-events-none"
               style={{ left: `${bufferEndLeft}%`, width: `${bufferEndWidth}%` }}
               title="10-min Egress Safety Headway Buffer"
             />
 
             {/* ================= ROW 1: SCHEDULED TRAIN OCCUPANCIES ================= */}
             <div className="absolute top-4 left-0 right-0 h-10 flex items-center px-1">
-              <span className="absolute left-2 text-[10px] uppercase font-mono tracking-wider text-slate-500 z-10 pointer-events-none">
-                TRAIN OCCUPANCY (COA)
+              <span className="absolute left-2 text-[9px] uppercase font-mono tracking-wider text-slate-500 z-10 pointer-events-none font-bold">
+                TRAIN OCCUPANCIES (COA)
               </span>
 
               {data.trains.map((train) => {
                 const left = timeToPercent(train.start);
                 const right = timeToPercent(train.end);
-                const width = Math.max(right - left, 1.8);
+                const width = Math.max(right - left, 2.0);
 
                 return (
                   <div
                     key={train.id}
-                    className="absolute h-7 rounded-md flex items-center px-2 text-xs font-mono font-medium shadow-md cursor-pointer transition-all hover:scale-105 hover:z-30 border"
+                    className="absolute h-7 rounded-lg flex items-center px-2 text-xs font-mono font-medium shadow-md cursor-pointer transition-all hover:scale-105 hover:z-30 border"
                     style={{
                       left: `${left}%`,
                       width: `${width}%`,
-                      backgroundColor: train.color === "#f59e0b" ? "rgba(245, 158, 11, 0.25)" : "rgba(56, 189, 248, 0.25)",
+                      backgroundColor:
+                        train.color === "#f59e0b"
+                          ? "rgba(245, 158, 11, 0.25)"
+                          : "rgba(56, 189, 248, 0.25)",
                       borderColor: train.color,
                       color: train.color,
                     }}
@@ -271,16 +288,16 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
                       setHoverItem({
                         type: "train",
                         title: `${train.number} ${train.name}`,
-                        sub: `Type: ${train.type} • Active Path KM 34.0 - 36.0`,
+                        sub: `Type: ${train.type} • Active Path Km 34.0 - 36.0`,
                         start: train.start_hhmm,
                         end: train.end_hhmm,
-                        meta: "Conflict Protected • Punctuality 100%",
+                        meta: "Conflict Protected • Headway Guaranteed",
                       })
                     }
                     onMouseLeave={() => setHoverItem(null)}
                   >
                     <Train className="w-3 h-3 mr-1 shrink-0" />
-                    <span className="truncate text-[10px]">{train.number}</span>
+                    <span className="truncate text-[10px] font-bold">{train.number}</span>
                   </div>
                 );
               })}
@@ -288,19 +305,23 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
 
             {/* ================= ROW 2: UNCOORDINATED REQUESTS (NAIVE FIFO) ================= */}
             <div className="absolute top-18 left-0 right-0 h-10 flex items-center px-1 border-t border-slate-800/40">
-              <span className="absolute left-2 text-[10px] uppercase font-mono tracking-wider text-slate-500 z-10 pointer-events-none">
-                NAIVE REQUESTS (UNCOORDINATED)
+              <span className="absolute left-2 text-[9px] uppercase font-mono tracking-wider text-rose-400/90 z-10 pointer-events-none font-bold">
+                NAIVE UNCOORDINATED DEMANDS
               </span>
 
               {data.original_demands.map((dem) => {
                 const left = timeToPercent(dem.start);
                 const right = timeToPercent(dem.end);
-                const width = Math.max(right - left, 2.5);
+                const width = Math.max(right - left, 2.8);
+                const isSelected = selectedBlockId === dem.block_id;
 
                 return (
-                  <div
+                  <button
                     key={`dem-${dem.block_id}`}
-                    className="absolute h-6 rounded border border-dashed border-red-500/80 bg-red-500/20 text-red-300 flex items-center px-2 text-[10px] font-mono cursor-pointer transition-transform hover:scale-105 hover:z-30"
+                    onClick={() => onSelectBlock(dem.block_id)}
+                    className={`absolute h-6 rounded-md border border-dashed border-rose-500 bg-rose-500/20 text-rose-300 flex items-center px-2 text-[10px] font-mono cursor-pointer transition-all hover:scale-105 hover:z-30 ${
+                      isSelected ? "ring-2 ring-rose-400 scale-105 z-30" : ""
+                    }`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                     onMouseEnter={() =>
                       setHoverItem({
@@ -314,35 +335,33 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
                     }
                     onMouseLeave={() => setHoverItem(null)}
                   >
-                    <AlertTriangle className="w-3 h-3 mr-1 text-red-400 shrink-0" />
-                    <span className="truncate">{dem.block_id}</span>
-                  </div>
+                    <AlertTriangle className="w-3 h-3 mr-1 text-rose-400 shrink-0" />
+                    <span className="truncate font-semibold">{dem.block_id}</span>
+                  </button>
                 );
               })}
             </div>
 
             {/* ================= ROW 3: CP-SAT BUNDLED SANCTIONED BLOCKS ================= */}
             <div className="absolute top-32 left-0 right-0 h-16 flex items-center px-1 border-t border-slate-800/40">
-              <span className="absolute left-2 text-[10px] uppercase font-mono tracking-wider text-emerald-400 z-10 pointer-events-none">
-                CP-SAT BUNDLED SLOTS (OPTIMIZED)
+              <span className="absolute left-2 text-[9px] uppercase font-mono tracking-wider text-emerald-400 z-10 pointer-events-none font-bold">
+                CP-SAT CO-LOCATED BUNDLED WINDOW
               </span>
 
               {data.sanctioned_blocks.map((block, idx) => {
                 const left = timeToPercent(block.start);
                 const right = timeToPercent(block.end);
-                const width = Math.max(right - left, 3.0);
+                const width = Math.max(right - left, 3.2);
                 const isSelected = selectedBlockId === block.block_id;
-
-                // Stagger slightly vertically if overlapping exactly
                 const topOffset = (idx % 3) * 16;
 
                 return (
                   <button
                     key={block.block_id}
                     onClick={() => onSelectBlock(block.block_id)}
-                    className={`absolute h-7 rounded-md flex items-center justify-between px-2.5 text-xs font-mono font-medium shadow-lg transition-all cursor-pointer border ${
+                    className={`absolute h-7 rounded-lg flex items-center justify-between px-2.5 text-xs font-mono font-medium shadow-lg transition-all cursor-pointer border ${
                       isSelected
-                        ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 z-40 scale-105"
+                        ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-slate-900 z-40 scale-105 shadow-amber-500/20"
                         : "hover:scale-102 hover:z-30"
                     }`}
                     style={{
@@ -360,43 +379,47 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
                         sub: `Type: ${block.block_type} • Status: ${block.status}`,
                         start: block.start_hhmm,
                         end: block.end_hhmm,
-                        meta: `Priority Weight: ${block.priority_weight}/100 • Bundled in Shadow Slot`,
+                        meta: `Priority Weight: ${block.priority_weight}/100 • Co-located in Shadow Window`,
                       })
                     }
                     onMouseLeave={() => setHoverItem(null)}
                   >
                     <div className="flex items-center space-x-1 truncate">
                       <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      <span className="truncate font-semibold">{block.block_id}</span>
-                      <span className="text-[10px] opacity-75 hidden sm:inline">({block.department.slice(0, 3)})</span>
+                      <span className="truncate font-bold">{block.block_id}</span>
+                      <span className="text-[10px] opacity-80 hidden sm:inline">
+                        ({block.department.slice(0, 3)})
+                      </span>
                     </div>
-                    <span className="text-[10px] font-mono opacity-90 hidden md:inline">{block.start_hhmm}-{block.end_hhmm}</span>
+                    <span className="text-[10px] font-mono opacity-90 hidden md:inline font-bold">
+                      {block.start_hhmm}-{block.end_hhmm}
+                    </span>
                   </button>
                 );
               })}
             </div>
 
-            {/* ================= ROW 4: SAFETY HEADWAY EXPLANATION ================= */}
-            <div className="absolute bottom-2 left-0 right-0 h-6 flex items-center justify-between px-4 text-[10px] font-mono text-slate-500">
+            {/* Bottom footnote */}
+            <div className="absolute bottom-2 left-0 right-0 h-6 flex items-center justify-between px-4 text-[10px] font-mono text-slate-400">
               <div className="flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
                 <span>Automatic 10-minute headway margin enforced on either side of maintenance window</span>
               </div>
-              <div className="flex items-center space-x-3">
-                <span className="text-emerald-400 font-semibold">Bundled Efficiency: 3 Blocks in 1 Window</span>
+              <div className="flex items-center space-x-2">
+                <span className="text-emerald-400 font-bold">Bundled Efficiency: 3 Blocks in 1 Window</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Interactive Tooltip Card */}
-      {hoverItem && (
-        <div className="mt-3 p-3 rounded-lg bg-slate-800/90 border border-slate-700 text-xs flex flex-col md:flex-row md:items-center justify-between gap-2 animate-fadeIn">
+      {/* Interactive Tooltip / Focus Card */}
+      {hoverItem ? (
+        <div className="mt-3 p-3 rounded-xl bg-slate-800/90 border border-slate-700 text-xs flex flex-col md:flex-row md:items-center justify-between gap-2 animate-fadeIn">
           <div>
             <div className="flex items-center space-x-2">
-              <Info className="w-4 h-4 text-sky-400" />
-              <span className="font-semibold text-white">{hoverItem.title}</span>
+              <Info className="w-4 h-4 text-sky-400 shrink-0" />
+              <span className="font-bold text-white">{hoverItem.title}</span>
               <span className="text-slate-400">•</span>
               <span className="text-slate-300">{hoverItem.sub}</span>
             </div>
@@ -406,12 +429,20 @@ export const GanttCorridorTimeline: React.FC<GanttTimelineProps> = ({
               </p>
             )}
           </div>
-          <div className="flex items-center space-x-2 shrink-0 self-end md:self-auto font-mono text-xs bg-slate-900/80 px-2.5 py-1 rounded border border-slate-700">
-            <span className="text-slate-400">Slot:</span>
-            <span className="text-sky-300 font-semibold">{hoverItem.start}</span>
+          <div className="flex items-center space-x-2 shrink-0 font-mono text-xs bg-slate-900 px-3 py-1 rounded-lg border border-slate-700">
+            <span className="text-slate-400">Time:</span>
+            <span className="text-sky-300 font-bold">{hoverItem.start}</span>
             <span className="text-slate-500">→</span>
-            <span className="text-sky-300 font-semibold">{hoverItem.end}</span>
+            <span className="text-sky-300 font-bold">{hoverItem.end}</span>
           </div>
+        </div>
+      ) : (
+        <div className="mt-3 px-3 py-2 rounded-xl bg-slate-950/40 border border-slate-800/60 text-[11px] font-mono text-slate-400 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <MousePointerClick className="w-3.5 h-3.5 text-sky-400" />
+            <span>Click any block on the Gantt to inspect safety scores, simulate reschedule shifts, or issue statutory Private Numbers (PN).</span>
+          </div>
+          <span className="text-slate-500 hidden sm:inline">Active Segment: {data.segment_id}</span>
         </div>
       )}
     </div>
