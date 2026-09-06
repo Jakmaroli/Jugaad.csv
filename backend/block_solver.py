@@ -11,6 +11,24 @@ Key capabilities:
    Maximize: Priority Weights - 2 * Joint Possession Span - 0.5 * Shift Minutes.
 5. Database persistence: Updates 'bdms_blocks' with approved timestamps and 'Sanctioning' status,
    logging every action to 'decision_audit' with 'System CTPC Solver'.
+
+DESIGN NOTE — Why a single operational day, not a multi-day joint model:
+This mirrors how Indian Railways actually sanctions possessions: block
+requests are submitted and granted for one calendar day, typically T-1,
+not solved jointly across a rolling multi-week window. Modeling multiple
+days as one CP-SAT problem would blow up the variable count for no
+operational benefit, since tomorrow's train timetable and defect backlog
+aren't finalized when today's blocks are sanctioned anyway.
+Instead this is a *daily rolling invocation* model: `run_solver_pipeline()`
+re-solves from scratch for whatever `TARGET_DATE_STR` is current. Because
+the CP-SAT solve itself completes in milliseconds (see the
+distributed-decomposition benchmark for cross-corridor scaling), running
+it once per day is trivial — the scaling question that matters is spatial
+(more segments/blocks per day), which `distributed_decomposer.py` already
+addresses by partitioning the corridor into independently-solved zones.
+Longer-range forecasting (weeks out) is a separate, coarser-grained
+concern, handled today by the 4-week rolling possession-density view in
+the cockpit, not by this solver.
 """
 
 import os

@@ -21,6 +21,7 @@ from backend.prioritization_engine import (
     load_unified_defects,
     train_ml_risk_predictor,
     ensure_priority_weight_column,
+    ensure_ml_adjustment_column,
     update_block_priorities,
     compute_local_block_explanation,
     run_prioritization_pipeline,
@@ -143,20 +144,23 @@ def test_priority_weight_database_modification():
 
     # Check column existence
     ensure_priority_weight_column(conn)
+    ensure_ml_adjustment_column(conn)
     cursor = conn.cursor()
     cursor.execute("PRAGMA table_info(bdms_blocks)")
     cols = [r[1] for r in cursor.fetchall()]
     assert "priority_weight" in cols, "'priority_weight' column was not added to bdms_blocks"
+    assert "ml_adjustment_pts" in cols, "'ml_adjustment_pts' column was not added to bdms_blocks"
 
     # Query populated values
-    cursor.execute("SELECT block_id, priority_weight FROM bdms_blocks")
+    cursor.execute("SELECT block_id, priority_weight, ml_adjustment_pts FROM bdms_blocks")
     rows = cursor.fetchall()
     conn.close()
 
     assert len(rows) == 7, f"Expected 7 blocks, found {len(rows)}"
-    for block_id, weight in rows:
+    for block_id, weight, ml_adj in rows:
         assert weight is not None, f"Block {block_id} has NULL priority_weight"
         assert 0.0 <= weight <= 100.0, f"Block {block_id} weight {weight} out of bounds"
+        assert ml_adj is not None, f"Block {block_id} has NULL ml_adjustment_pts"
 
 
 def test_segment_35_emergency_block_priority():

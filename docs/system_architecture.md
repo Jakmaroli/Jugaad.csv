@@ -82,6 +82,12 @@ graph TD
 
 ### A. CP-SAT Multi-Departmental Bundling Solver
 - **Horizon**: Discrete minutes from midnight $\mathcal{T} = [0, 1440]$ for operational date `2026-09-08`.
+  This is a deliberate **daily rolling invocation** design, not a limitation: Indian Railways sanctions
+  possessions one calendar day at a time (typically T-1), so the solver re-solves fresh each day rather
+  than jointly optimizing a multi-day window whose future timetables and defects aren't finalized yet
+  anyway. Spatial scale (more blocks/segments per day) is handled by the distributed decomposition in
+  §D below; longer-range (multi-week) forecasting is a separate, coarser concern surfaced in the
+  cockpit's 4-week rolling possession-density view, not by this solver.
 - **Interval Representation**: Each block $b \in \mathcal{B}$ is an interval variable $[s_b, e_b]$ with duration $d_b = e_b - s_b$.
 - **Safety Headway Constraint**: For every train passage $t \in \mathcal{T}_{\text{trains}}$ occupying segment $k$, and block $b$ on segment $k$:
   $$(e_b \le \text{arr}_t - \Delta_{\text{buffer}}) \quad \lor \quad (s_b \ge \text{dep}_t + \Delta_{\text{buffer}})$$

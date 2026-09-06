@@ -353,17 +353,48 @@ def ensure_priority_weight_column(conn: sqlite3.Connection):
         conn.commit()
 
 
+def ensure_ml_adjustment_column(conn: sqlite3.Connection):
+    """
+    Safely check and add 'ml_adjustment_pts' column to 'bdms_blocks' if missing.
+    Stores the *actual* signed point contribution the trained RandomForestRegressor
+    made to the final priority_weight (blended_score - rule_criticality_score), so
+    the XAI waterfall can show a real, persisted number instead of inferring one.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(bdms_blocks)")
+    existing_cols = [row[1] for row in cursor.fetchall()]
+    if "ml_adjustment_pts" not in existing_cols:
+        cursor.execute("ALTER TABLE bdms_blocks ADD COLUMN ml_adjustment_pts FLOAT DEFAULT 0.0")
+        conn.commit()
+
+
 def update_block_priorities(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Compute criticality across active department defects per block segment,
     safely alter bdms_blocks, and populate priority_weight.
+
+    The final score blends two independent signals so the trained model
+    actually influences the decision the controller sees, instead of only
+    powering the feature-importance chart:
+      - 75%: the transparent, hand-auditable rule-based criticality score.
+      - 25%: the trained RandomForestRegressor's predicted risk, which
+        captures the traffic x TGI-degradation interaction the linear rule
+        formula can't (it only sums independent terms).
+    Emergency blocks still carry a hard statutory floor of 95.0 regardless
+    of the blend, since safety-critical possessions must never be
+    de-prioritized by a model.
     """
-    # 1. Load defects cleanly first to avoid simultaneous open SQLite connections
+    RULE_WEIGHT = 0.75
+    ML_WEIGHT = 0.25
+
+    # 1. Load defects and train the risk model once for this pass.
     df_defects = load_unified_defects(db_path)
+    _, _, df_scored = train_ml_risk_predictor(df_defects)
 
     resolved_path = get_db_path(db_path)
     conn = sqlite3.connect(resolved_path)
     ensure_priority_weight_column(conn)
+    ensure_ml_adjustment_column(conn)
 
     cursor = conn.cursor()
     cursor.execute("""
@@ -375,31 +406,41 @@ def update_block_priorities(db_path: Optional[str] = None) -> List[Dict[str, Any
     updates = []
     for b_id, dept, b_type, seg_id, desc in blocks:
         # Filter defects assigned to this department and segment
-        dept_match = df_defects[
-            (df_defects["department"] == dept) & (df_defects["segment_id"] == seg_id)
+        dept_match = df_scored[
+            (df_scored["department"] == dept) & (df_scored["segment_id"] == seg_id)
         ]
 
         if not dept_match.empty:
-            max_crit = float(dept_match["rule_criticality_score"].max())
+            top_row = dept_match.loc[dept_match["rule_criticality_score"].idxmax()]
+            rule_score = float(top_row["rule_criticality_score"])
+            ml_score = float(top_row["predictive_risk_prob"])
         else:
             # Check any defect on that segment if multi-departmental
-            seg_match = df_defects[df_defects["segment_id"] == seg_id]
+            seg_match = df_scored[df_scored["segment_id"] == seg_id]
             if not seg_match.empty:
-                max_crit = float(seg_match["rule_criticality_score"].max() * 0.85)
+                top_row = seg_match.loc[seg_match["rule_criticality_score"].idxmax()]
+                rule_score = float(top_row["rule_criticality_score"]) * 0.85
+                ml_score = float(top_row["predictive_risk_prob"]) * 0.85
             else:
-                max_crit = 25.0  # Baseline routine priority
+                rule_score = 25.0  # Baseline routine priority
+                ml_score = 25.0
 
-        # Emergency rule: Ensure safety severity (weight >= 90)
+        blended_score = RULE_WEIGHT * rule_score + ML_WEIGHT * ml_score
+        # Real, signed contribution the ML model made vs. the rule score alone.
+        ml_adjustment_pts = round(blended_score - rule_score, 2)
+
+        # Emergency rule: Ensure safety severity (weight >= 90), applied AFTER
+        # blending so the floor always wins regardless of what the model says.
         if b_type == "Emergency":
-            final_weight = max(max_crit, 95.0)
+            final_weight = max(blended_score, 95.0)
         else:
-            final_weight = max_crit
+            final_weight = blended_score
 
         final_weight = round(min(100.0, max(5.0, final_weight)), 2)
 
         cursor.execute(
-            "UPDATE bdms_blocks SET priority_weight = ? WHERE block_id = ?",
-            (final_weight, b_id),
+            "UPDATE bdms_blocks SET priority_weight = ?, ml_adjustment_pts = ? WHERE block_id = ?",
+            (final_weight, ml_adjustment_pts, b_id),
         )
         updates.append({
             "block_id": b_id,
@@ -407,6 +448,8 @@ def update_block_priorities(db_path: Optional[str] = None) -> List[Dict[str, Any
             "block_type": b_type,
             "segment_id": seg_id,
             "priority_weight": final_weight,
+            "rule_criticality_score": round(rule_score, 2),
+            "ml_adjustment_pts": ml_adjustment_pts,
         })
 
     conn.commit()
@@ -426,10 +469,12 @@ def compute_local_block_explanation(block_id: str, db_path: Optional[str] = None
     """
     resolved_path = get_db_path(db_path)
     conn = sqlite3.connect(resolved_path)
+    ensure_priority_weight_column(conn)
+    ensure_ml_adjustment_column(conn)
     cur = conn.cursor()
 
     blk = cur.execute("""
-        SELECT block_id, department, block_type, segment_id, priority_weight, work_description
+        SELECT block_id, department, block_type, segment_id, priority_weight, work_description, ml_adjustment_pts
         FROM bdms_blocks
         WHERE block_id = ?
     """, (block_id,)).fetchone()
@@ -438,8 +483,9 @@ def compute_local_block_explanation(block_id: str, db_path: Optional[str] = None
         conn.close()
         raise ValueError(f"Block '{block_id}' not found in database.")
 
-    b_id, dept, b_type, seg_id, p_weight, work_desc = blk
+    b_id, dept, b_type, seg_id, p_weight, work_desc, ml_adjustment_pts = blk
     p_weight = float(p_weight or 25.0)
+    ml_adjustment_pts = float(ml_adjustment_pts) if ml_adjustment_pts is not None else 0.0
 
     asset = cur.execute("""
         SELECT yearly_gmt, tgi_index, active_psr_km, psr_speed_kmph
@@ -475,9 +521,6 @@ def compute_local_block_explanation(block_id: str, db_path: Optional[str] = None
     age_pts = rule_res["asset_age_pts"]
     rule_score = rule_res["rule_criticality_score"]
 
-    # Non-linear synergy difference between composite ML/safety score and linear rules
-    synergy_pts = round(p_weight - (base_pts + traffic_pts + tgi_pts + psr_pts + age_pts), 2)
-
     conn.close()
 
     components = [
@@ -488,11 +531,33 @@ def compute_local_block_explanation(block_id: str, db_path: Optional[str] = None
         {"feature": "Asset Age / Latency", "value": age_pts, "description": f"Recent defect detection (+{age_pts} pts)"},
     ]
 
-    if abs(synergy_pts) > 0.05:
+    # Real, persisted contribution from the trained RandomForestRegressor
+    # (blended_score - rule_score at the time update_block_priorities() ran),
+    # not an inferred residual.
+    if abs(ml_adjustment_pts) > 0.05:
         components.append({
-            "feature": "Non-Linear Interaction & Floor",
-            "value": synergy_pts,
-            "description": f"Random Forest non-linear synergy ({'+' if synergy_pts > 0 else ''}{synergy_pts} pts)",
+            "feature": "ML Risk Adjustment (Random Forest)",
+            "value": ml_adjustment_pts,
+            "description": (
+                f"Trained risk model's traffic\u00d7TGI-degradation interaction term "
+                f"({'+' if ml_adjustment_pts > 0 else ''}{ml_adjustment_pts} pts)"
+            ),
+        })
+
+    # Anything still unaccounted for is an explicit, named safety floor/clamp,
+    # not a mystery number — this keeps the waterfall summing exactly to the
+    # final score in every case.
+    floor_pts = round(p_weight - (rule_score + ml_adjustment_pts), 2)
+    if abs(floor_pts) > 0.05:
+        components.append({
+            "feature": "Safety Floor Enforcement" if b_type == "Emergency" else "Score Range Clamp",
+            "value": floor_pts,
+            "description": (
+                "Statutory minimum priority of 95.0 enforced for Emergency-class possessions "
+                f"({'+' if floor_pts > 0 else ''}{floor_pts} pts)"
+                if b_type == "Emergency"
+                else f"Score clamped to the valid [5, 100] range ({'+' if floor_pts > 0 else ''}{floor_pts} pts)"
+            ),
         })
 
     return {
